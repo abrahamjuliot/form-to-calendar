@@ -1,14 +1,17 @@
-function test() {
-  // helpers
-  function last(x) { return  x.split(" ").pop() }
-  function locale(x) { return Utilities.formatDate(new Date(x), "PST", "EEE M/d/yyyy @hh:mm aaa, z") }
-  data = {} //to hold response data
-  // calendars
-  var vehicle1 = CalendarApp.getCalendarById('classroom114019805839838377679@group.calendar.google.com')
-  var vehicle2 = CalendarApp.getCalendarById('k295p3m9o03cqobt674lgjnass@group.calendar.google.com')
-  // form
-  var form = FormApp.openByUrl('https://docs.google.com/forms/d/1mHz-WNoyv5FohtQxssOkO5oDxW2OPUkXG0BALiGBTAs/edit')
-  // get form reponse
+// @require Calendar API
+function isBusy(calendarId, start, end) {
+  var check = {
+    items: [{id: calendarId, busy: 'Active'}],
+    timeMin: start,
+    timeMax: end
+  }
+  var response = Calendar.Freebusy.query(check)
+  var busyCollection = response.calendars[calendarId].busy
+  return busyCollection.length 
+}
+
+function getResponse(form) {
+  var data = {}
   var formResponses = form.getResponses()
   var latest = formResponses.length-1
   var thisResponse = formResponses[latest]
@@ -20,9 +23,30 @@ function test() {
     var title = thisItemResponse.getItem().getTitle()
     var response = thisItemResponse.getResponse()
     data[title] = response // construct response object
-    
   }
-  // create calendar event(s)
+  return { data: data, creationDate: creationDate, respondentEmail: respondentEmail }
+}
+
+function test() {
+  // helpers
+  function last(x) { return  x.split(" ").pop() }
+  function locale(x) { return Utilities.formatDate(new Date(x), "PST", "EEE M/d/yyyy @hh:mm aaa, z") }
+  
+  var cal1 = 'classroom114019805839838377679@group.calendar.google.com'
+  var cal2 = 'k295p3m9o03cqobt674lgjnass@group.calendar.google.com'
+  
+  // calendars
+  var vehicle1 = CalendarApp.getCalendarById(cal1)
+  var vehicle2 = CalendarApp.getCalendarById(cal2)
+  
+  // get form reponse
+  var form = FormApp.openByUrl('https://docs.google.com/forms/d/1mHz-WNoyv5FohtQxssOkO5oDxW2OPUkXG0BALiGBTAs/edit')
+  var res = getResponse(form)
+  var data = res.data
+  var creationDate = res.creationDate
+  var respondentEmail = res.respondentEmail
+  
+  // construct reservation
   var name = data['Name']
   var lastname = last(name)
   var purpose = data['Purpose']
@@ -41,7 +65,14 @@ function test() {
       +'\nPurpose: '+purpose
       +'\nDriver(s): '+drivers
       +'\nCreated on '+locale(creationDate)
-  } 
+  }
+  
+  // check availability
+  var start = pickupTime.toISOString()
+  var end = returnTime.toISOString()
+  var cal1isFree = !isBusy(cal1, start, end)
+  var cal2isFree = !isBusy(cal2, start, end)
+  var bothCalFree = !isBusy(cal1, start, end) && !isBusy(cal2, start, end)
   
   // send email 
   function withinBusiness(x) {
@@ -50,41 +81,53 @@ function test() {
     var day = date.getDay()
     var saturday = 6
     var sunday = 0
-    Logger.log(date+', '+hour+', '+day)
     return (day !== saturday && day !== sunday) && (hour >= 8 && hour < 17)
   }
-  var warning = ' *** Not within office hours M-F 8am-5pm ***'
-  var content = 'Thank you. Your request is in review. We will respond to confirm the status.'
+  
+  function noConflict(choice, cal1isFree, cal2isFree, bothCalFree) {
+    if (choice === 'one' && cal1isFree) { return true }
+    else if (choice === 'two' && cal2isFree) { return true }
+    else if (bothCalFree) { return true } 
+    return false
+  }
+  
+  var isAvailable = noConflict(choice, cal1isFree, cal2isFree, bothCalFree)
+  var invalidTime = pickupTime>returnTime
+  var content = 'Thank you. Your request is in review. We will respond to confirm the reservation status.'
       +'\n\nCreated by: '+name
       +'\nType: '+type
       +'\n'+(course?'Course: '+course: 'Fund: [ captured in form response ]')
       +'\nPurpose: '+purpose
       +'\nDriver(s): '+drivers
-      +'\nKey Pickup: '+locale(pickupTime)+(!withinBusiness(pickupTime)?warning: '')
-      +'\nKey Return: '+locale(returnTime)+(!withinBusiness(returnTime)?warning: '')
-      +(pickupTime>returnTime?'\n\n*** Error: return time is set before pickup time ***': '')
+      +'\nKey Pickup: '+locale(pickupTime)
+      +'\nKey Return: '+locale(returnTime)
+      +'\n'
+      +(!withinBusiness(pickupTime)?'\n⚠️ Key pickup time is not within office hours': '')
+      +(!withinBusiness(returnTime)?'\n⚠️ Key return time is not within office hours': '')
+      +(invalidTime?'\n⚠️ Return time requested is before the pickup time': '')
+      +(!isAvailable?'\n⚠️ Dates/times requested conflict with 1 or more events on the calendar':'')
+      +(!invalidTime && isAvailable?'\n💾 This reservation is on hold within the calendar(s).': '')
       
-      // non-course may reserve on the 1st of the quarter
-      // avoid double-booking
-      // all drivers must be authorized
-  
+ 
   GmailApp.sendEmail(respondentEmail, 'EPS Vehicle Reservation - '+title, content, {
     name: 'Automatic Emailer Script',
-    cc: 'emails...'
+    cc: 'abeletter@gmail.com, abeletter@gmail.com'
   })
   
   // reserve events
-  if (choice === 'one') {
-    vehicle1.createEvent(title, pickupTime, returnTime, desc)
-    .addGuest(respondentEmail)
-  } else if (choice === 'two') {
-    vehicle2.createEvent(title, pickupTime, returnTime, desc)
-    .addGuest(respondentEmail)
-  } else { // both
-    vehicle1.createEvent(title, pickupTime, returnTime, desc)
-    .addGuest(respondentEmail)
-    vehicle2.createEvent(title, pickupTime, returnTime, desc)
-    .addGuest(respondentEmail)
+  if (isAvailable) {
+      if (choice === 'one') {
+        vehicle1.createEvent(title, pickupTime, returnTime, desc)
+        .addGuest(respondentEmail)
+      } else if (choice === 'two') {
+        vehicle2.createEvent(title, pickupTime, returnTime, desc)
+        .addGuest(respondentEmail)
+      } else { // both
+        vehicle1.createEvent(title, pickupTime, returnTime, desc)
+        .addGuest(respondentEmail)
+        vehicle2.createEvent(title, pickupTime, returnTime, desc)
+        .addGuest(respondentEmail)
+      }
   }
 
 }
