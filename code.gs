@@ -18,13 +18,24 @@ function getResponse(form) {
   var respondentEmail = thisResponse.getRespondentEmail()
   var creationDate = thisResponse.getTimestamp()
   var itemResponses = thisResponse.getItemResponses()
+  
+  var formItems = form.getItems()
+  var vehicleItem = null
+  
   for (var i in itemResponses) {
     var thisItemResponse = itemResponses[i]
     var title = thisItemResponse.getItem().getTitle()
     var response = thisItemResponse.getResponse()
     data[title] = response // construct response object
   }
-  return { data: data, creationDate: creationDate, respondentEmail: respondentEmail }
+  
+  for (var i in formItems) {
+    var thisItem = formItems[i]
+    var itemTitle = thisItem.getTitle()
+    if (itemTitle === 'Vehicles (course)') { vehicleItem = formItems[i] }
+  }
+  
+  return { data: data, creationDate: creationDate, respondentEmail: respondentEmail, vehicleItem: vehicleItem }
 }
 
 function test() {
@@ -45,6 +56,7 @@ function test() {
   var data = res.data
   var creationDate = res.creationDate
   var respondentEmail = res.respondentEmail
+  var vehicleItem = res.vehicleItem
   
   // construct reservation
   var name = data['Name']
@@ -52,11 +64,16 @@ function test() {
   var purpose = data['Purpose']
   var type = data['Type']
   var course = data['Course']
-  var drivers = data['Drivers'].join(', ')
+  var drivers = data['Drivers']? data['Drivers'].join(', '): ''
   var title = type+(course? ': '+course+' ('+lastname+')': ' ('+lastname+')')
   var pickupTime = new Date(data['Pickup'].replace(/-/g,'/')) // regex required for valid date
   var returnTime = new Date(data['Return'].replace(/-/g,'/')) 
   var courseVehicles = data['Vehicles (course)']
+  
+  var vehChoices = vehicleItem.asMultipleChoiceItem().getChoices()
+  var veh1Title = vehChoices[0].getValue()
+  var veh2Title = vehChoices[1].getValue()
+  
   var nonCourseVehicle = data['Vehicle (non-course)']
   var choice = courseVehicles? courseVehicles: nonCourseVehicle
   var desc = {
@@ -84,14 +101,14 @@ function test() {
     return (day !== saturday && day !== sunday) && (hour >= 8 && hour < 17)
   }
   
-  function noConflict(choice, cal1isFree, cal2isFree, bothCalFree) {
-    if (choice === 'one' && cal1isFree) { return true }
-    else if (choice === 'two' && cal2isFree) { return true }
+  function noConflict(choice, cal1isFree, cal2isFree, bothCalFree, veh1Title, veh2Title) {
+    if (choice === veh1Title && cal1isFree) { return true }
+    else if (choice === veh2Title && cal2isFree) { return true }
     else if (bothCalFree) { return true } 
     return false
   }
   
-  var isAvailable = noConflict(choice, cal1isFree, cal2isFree, bothCalFree)
+  var isAvailable = noConflict(choice, cal1isFree, cal2isFree, bothCalFree, veh1Title, veh2Title)
   var invalidTime = pickupTime>returnTime
   var content = 'Thank you. Your request is in review. We will respond to confirm the reservation status.'
       +'\n\nCreated by: '+name
@@ -116,10 +133,10 @@ function test() {
   
   // reserve events
   if (isAvailable) {
-      if (choice === 'one') {
+      if (choice === veh1Title) {
         vehicle1.createEvent(title, pickupTime, returnTime, desc)
         .addGuest(respondentEmail)
-      } else if (choice === 'two') {
+      } else if (choice === veh2Title) {
         vehicle2.createEvent(title, pickupTime, returnTime, desc)
         .addGuest(respondentEmail)
       } else { // both
@@ -129,5 +146,6 @@ function test() {
         .addGuest(respondentEmail)
       }
   }
+
 
 }
