@@ -1,27 +1,31 @@
 // @require Calendar API
 function constantData() {
   return {
+    admin: {
+      title: 'BEES Admin',
+      email: 'beesadmin@ucr.edu'
+    },
     form: {
-      url: 'https://docs.google.com/forms/d/15H917_E87D_kui1EYEpLburhCsj55MD0Q6TPmM8afME/edit',
+      url: 'https://docs.google.com/forms/d/1a93B0aeYjuJkmBZEo1yD9yrjGbiQ-MCftSwBe7-LdOU/edit',
       app: function() { return FormApp.openByUrl(this.url) }
     },
-    calendar: [ // order must mirror order on form and form must only allow 1 choice
+    calendar: [
       {
         name: '217',
-        viewLink: 'https://bit.ly/2QKCkS9',
-        id: 'classroom114019805839838377679@group.calendar.google.com',
+        viewLink: 'https://calendar.google.com/calendar/embed?height=600&wkst=1&bgcolor=%23ffffff&ctz=America%2FLos_Angeles&showTabs=1&showCalendars=0&showPrint=0&showTz=0&mode=WEEK&src=dDc2bmd0NHU5NGlpM2VnMjJzNGxoYnZ2Nm9AZ3JvdXAuY2FsZW5kYXIuZ29vZ2xlLmNvbQ&color=%23227F63',
+        id: 't76ngt4u94ii3eg22s4lhbvv6o@group.calendar.google.com',
         app: function() { return CalendarApp.getCalendarById(this.id) }
       },
       {
         name: '301',
-        viewLink: 'https://bit.ly/2QKCkS9',
-        id: 'k295p3m9o03cqobt674lgjnass@group.calendar.google.com',
+        viewLink: 'https://calendar.google.com/calendar/embed?height=600&wkst=1&bgcolor=%23ffffff&ctz=America%2FLos_Angeles&showTabs=1&showCalendars=0&showPrint=0&showTz=0&src=bnZyazU0OTdtMXJyMG05ZDc4YnBwcm40ZWdAZ3JvdXAuY2FsZW5kYXIuZ29vZ2xlLmNvbQ&color=%2322AA99&mode=WEEK',
+        id: 'nvrk5497m1rr0m9d78bpprn4eg@group.calendar.google.com',
         app: function() { return CalendarApp.getCalendarById(this.id) }
       },
       {
         name: '311',
-        viewLink: 'https://bit.ly/2QKCkS9',
-        id: 'lgtpdit5puaeuic17ndbmln5ss@group.calendar.google.com',
+        viewLink: 'https://calendar.google.com/calendar/embed?height=600&wkst=1&bgcolor=%23ffffff&ctz=America%2FLos_Angeles&showTabs=1&showCalendars=0&showPrint=0&showTz=0&mode=WEEK&src=OG8xNDZoMWw4NGlsNmY1ZGo4ODk2dXN0MGNAZ3JvdXAuY2FsZW5kYXIuZ29vZ2xlLmNvbQ&color=%23402175',
+        id: '8o146h1l84il6f5dj8896ust0c@group.calendar.google.com',
         app: function() { return CalendarApp.getCalendarById(this.id) }
       }
     ]
@@ -43,7 +47,8 @@ function isBusy(calendarId, start, end) {
   
   catch (err) {
       return true
-  }    
+  } 
+
 }
 
 function getResponse(form) {
@@ -71,6 +76,8 @@ function getResponse(form) {
 
 function reserveRoom() {
   var constant = constantData()
+  var adminTitle = constant.admin.title
+  var adminEmail = constant.admin.email
   var calendar = constant.calendar
   
   // helpers
@@ -92,7 +99,8 @@ function reserveRoom() {
   var name = data['Name']
   var dept = data['Department']
   var room = data['Room']
-  var purpose = data['Purpose']
+  var thisCalendar = calendar.filter(function(cal) { return cal.name === room })[0]
+  var type = data['Type']
   var title = data['Title']
   var customize = data['Customize']
   var repeat = data['Repeat On']
@@ -125,7 +133,7 @@ function reserveRoom() {
   var invalidTime = (beginsAt>endsAt) || (endDate? beginsAt> newCalDate(endDate+' '+endTime): false)
     
   //check for recurring conflicts  
-  function recurringConflicts(eventDetail, calendar) {
+  function recurringConflicts(eventDetail, thisCalendar) {
     
     function getEventTimes(event) { return { starts: event.getStartTime(), ends: event.getEndTime() } }
     function eventTime(x) { return Utilities.formatDate(new Date(x), "PST", "hh:mm aaa") }
@@ -138,19 +146,10 @@ function reserveRoom() {
     var endTime = eventDetail.endTime
     var selectedWeekdays = eventDetail.selectedWeekdays
     
-    var events = [] // collect all events within range
+    var events = thisCalendar.app().getEvents(startDate, endDate).map(getEventTimes) // collect all events within range
     var conflicts = [] // collect all conflicting events
-    var calendarId = '' //determine calendar id
-    
-    for (var i in calendar) {
-      var cal = calendar[i]      
-      if (cal.name === room) {
-        events = cal.app().getEvents(startDate, endDate).map(getEventTimes)
-        calendarId = cal.id
-        break
-      }
-    }
-        
+    var calendarId = thisCalendar.id //determine calendar id
+            
     for (var e in events) {
       var event = events[e]
       var day = event.starts.getDay()
@@ -171,26 +170,16 @@ function reserveRoom() {
   }
                                                          
   // check for 1 day conflicts 
-  function noConflict(room, start, end, calendar) {
+  function noConflict(room, start, end, thisCalendar) {
     var startISO = start.toISOString()
-    var endISO = end.toISOString()
-    var conflictFound = false
-    
-    for (var i in calendar) {
-      var cal = calendar[i]      
-      if (cal.name === room && !isBusy(cal.id, startISO, endISO)) {
-        conflictFound = true
-        break
-      }
-    }
-    
-    return conflictFound
+    var endISO = end.toISOString()    
+    return !isBusy(thisCalendar.id, startISO, endISO)
   }
   
   // recurring event detail
   var eventDetail = {
     room: room,
-    selectedWeekdays: repeat.map(function(weekday) { return weekday.toLowerCase() }),
+    selectedWeekdays: repeat? repeat.map(function(weekday) { return weekday.toLowerCase() }): [],
     startDate: newCalDate(eventDate),
     endDate: newCalDate(endDate),
     startTime: startTime,
@@ -198,9 +187,9 @@ function reserveRoom() {
   }
   
   // collect 1+ day conflicts
-  var conflicts = repeat ? recurringConflicts(eventDetail, calendar): []
+  var conflicts = repeat ? recurringConflicts(eventDetail, thisCalendar): []
   
-  var isAvailable = !repeat? noConflict(room, beginsAt, endsAt, calendar): !conflicts.length
+  var isAvailable = !repeat? noConflict(room, beginsAt, endsAt, thisCalendar): !conflicts.length
    
   var firstWeekday = repeat? repeat[0].toLowerCase(): undefined
   var lastWeekday = repeat? repeat[repeat.length-1].toLowerCase(): undefined
@@ -209,18 +198,6 @@ function reserveRoom() {
   var validRecurringDate = customize === 'Yes' && validTimeAndLengthAndIsAvailable
   
   var statusEmoji = validTimeAndLengthAndIsAvailable? '✅': '❌'
-  
-  function getCalendarLink(room, calendar) {
-    var link = ''
-    for (var i in calendar) {
-      var cal = calendar[i]
-      if (cal.name === room) {
-        link = cal.viewLink
-        break
-      }
-    }
-    return link
-  }
   
   var content = 'Thank you'
       +(!validTimeAndLengthAndIsAvailable? '<br>❌ This event is not reserved. Please correct the errors and resubmit:': '')
@@ -247,7 +224,7 @@ function reserveRoom() {
       
       +'<br>'
       +'<br><strong>Department</strong>: '+dept
-      +'<br><strong>Purpose</strong>: '+purpose
+      +'<br><strong>Type</strong>: '+type
       +'<br><strong>Room</strong>: '+room
       +(!repeat?'<br><strong>Reservation Date</strong>: '+eventDay(beginsAt):'')
       +'<br><strong>Start Time</strong>: '+eventTime(beginsAt) 
@@ -263,18 +240,14 @@ function reserveRoom() {
       +(!invalidTime && repeat && (weekdays[newCalDate(endDate+' '+endTime).getDay()-1] !== lastWeekday) ?'<br>⚠️ Note: The end date is not on the last reccuring weekday.': '')
       
 
-      +'<br><br>View the <a href="'
-      +(
-        getCalendarLink(room, calendar)
-       )
-      +'">calendar</a>.'
+      +'<br><br>View the <a href="'+thisCalendar.viewLink+'">calendar</a>.'
       
       +'<br><br>Request Id: '+responseId
   
   // send email notification    
   GmailApp.sendEmail(respondentEmail, statusEmoji+' ENSC Room '+room+' Reservation - '+title+' ('+name+')', '', {
-    name: 'Automatic Emailer Script',
-    cc: 'abeletter@gmail.com',
+    name: adminTitle,
+    cc: adminEmail,
     htmlBody: content
   })
   
@@ -285,9 +258,7 @@ function reserveRoom() {
   
   // reserve events
   if (validDate) {
-    calendar.forEach(function(cal) {
-      return cal.name === room? cal.app().createEvent(title, beginsAt, endsAt, desc).addGuest(respondentEmail): undefined
-    })
+    thisCalendar.app().createEvent(title, beginsAt, endsAt, desc).addGuest(respondentEmail)
   } else if (validRecurringDate) {
     var recurrence = CalendarApp.newRecurrence().addWeeklyRule().onlyOnWeekdays(
       repeat.map(function(item) { return CalendarApp.Weekday[item.toUpperCase()] })
@@ -297,9 +268,7 @@ function reserveRoom() {
     // exclude the first date if it is not in the event series
     if (!isAmongSelectedWeekdays(repeat, beginsAt.getDay())) { recurrence.addDateExclusion(beginsAt) }
       
-    calendar.forEach(function(cal) {
-      return cal.name === room? cal.app().createEventSeries(title, beginsAt, endsAt, recurrence, desc).addGuest(respondentEmail): undefined
-    })
+    thisCalendar.app().createEventSeries(title, beginsAt, endsAt, recurrence, desc).addGuest(respondentEmail)
     
   }
 
